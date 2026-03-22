@@ -1,4 +1,4 @@
-from samplePlugins import Highlighter, FileManager, Fetcher
+from extensionPointDef import Highlighter, FileManager, Fetcher
 
 @Highlighter(foo=4)
 def MyHighlighter(text):

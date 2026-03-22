@@ -1,9 +1,9 @@
 import asyncio
-from samplePlugins import pm, Highlighter, FileManager, Fetcher
+from extensionPointDef import pm, Highlighter, FileManager, Fetcher
 
 
 with pm.new_plugin("MyPluginName") as plugin:
-    plugin.load_files("./sampleApiUse.py")
+    plugin.load_files("./samplePlugin.py")
 
 for highlighter in pm.get_extensions(extension_point=Highlighter):
     print(highlighter.__name__)
