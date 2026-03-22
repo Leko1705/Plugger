@@ -2,6 +2,7 @@ import functools
 import importlib.util
 import inspect
 import sys
+from os import PathLike
 from pathlib import Path
 from typing import List, Any, Callable, Iterable
 import abc
@@ -35,16 +36,40 @@ class Extension:
 
 
 class Plugin:
+    """
+    A plugin represents a collection of extensions.
+    """
+
+    name: str
+    """ The name of this plugin """
+
+    enabled: bool
+    """ 
+    If True this plugins extensions can be found 
+    by the general extension access PluginManager.get_extensions() 
+    """
+
+
     def __init__(self, name, manager):
         self.name = name
         self.enabled = True
         self._extensions = {}
         self._manager = manager
-        self.files = set()
+        self._files = set()
 
     @property
     def extensions(self):
+        """
+        All extensions included in this plugin
+        """
         return [ext for exts in self._extensions.values() for ext in exts]
+
+    @property
+    def files(self):
+        """
+        All files that have been loaded into this plugin
+        """
+        return self._files.copy()
 
     def __enter__(self):
         self._manager._plugin_init_stack.append(self)
@@ -54,7 +79,11 @@ class Plugin:
         self._manager._plugin_init_stack.pop()
         pass
 
-    def load_files(self, file_path):
+    def load_files(self, file_path: str | PathLike):
+        """
+        Loads a given python files extensions into this plugin
+        :param file_path: python file path
+        """
         with self:
             try:
                 path = Path(file_path)
@@ -67,18 +96,24 @@ class Plugin:
                 module = importlib.util.module_from_spec(spec)
                 sys.modules[module_name] = module
                 spec.loader.exec_module(module)
-                self.files.add(str(path.absolute()))
+                self._files.add(str(path.absolute()))
                 return module
             except RuntimeError:
                 self.unload_files(file_path)
 
-    def unload_files(self, file_paths):
+    def unload_files(self, file_paths: str | PathLike | Iterable[str | PathLike]):
+        """
+        Unloads all files that have been loaded into this plugin.
+        This method removes all extensions that have been associated
+        with the given files. Does nothing for path that have not been loaded.
+        :param file_paths: the file paths to unload
+        """
         if not isinstance(file_paths, Iterable):
             file_paths = [file_paths]
         for file_path in [f for f in file_paths]:
             file_path = str(Path(file_path).absolute())
-            if file_path in self.files:
-                self.files.remove(file_path)
+            if file_path in self._files:
+                self._files.remove(file_path)
             for ext_key, extensions in [pair for pair in self._extensions.items()]:
                 for extension in extensions:
                     ext_file = str(Path(extension.__file__).absolute())
@@ -86,7 +121,10 @@ class Plugin:
                         del self._extensions[ext_key]
 
     def unload(self):
-        self.unload_files(self.files)
+        """
+        Unloads this plugin by removing itself from the plugin manager.
+        """
+        self.unload_files(self._files)
         self.enabled = False
         del self._manager._plugin_cache[self.name]
 
@@ -106,27 +144,54 @@ def prepare_extension_arguments_for_ep(ep, ep_kwargs, ext_kwargs):
         ext_kwargs[k] = v
 
 class PluginManager:
+    """
+    Keeps track of all registered plugins and extension points.
+    """
 
     _plugin_cache = {}
     _plugin_init_stack = []
     _extension_points = set()
 
-    def new_plugin(self, name):
+    def new_plugin(self, name: str) -> Plugin:
+        """
+        Creates a new plugin with the given name.
+        :param name: the plugins name
+        :return: the new plugin
+        """
         if name in self._plugin_cache:
             raise ValueError(f"Plugin {name} already exists")
         plugin = Plugin(name, self)
         self._plugin_cache[name] = plugin
         return plugin
 
-    def get_plugin(self, name) -> Plugin:
+    def get_plugin(self, name: str) -> Plugin:
+        """
+        Returns the plugin by the given name.
+        :param name: the plugins name
+        :return: a plugin
+        """
         if name not in self._plugin_cache:
             raise ValueError(f"Plugin {name} does not exist")
         return self._plugin_cache[name]
 
-    def has_plugin(self, name):
+    def has_plugin(self, name: str) -> bool:
+        """ Returns whether a plugin with the given name exists. """
         return name in self._plugin_cache
 
-    def get_extensions(self, extension_point: str | Callable | type = None, enabled=True, disabled=False) -> List[Any]:
+    def get_extensions(self,
+                       extension_point: str | Callable | type = None,
+                       enabled: bool = True,
+                       disabled: bool = False) -> List[Any]:
+        """
+        Returns all extensions, across all plugins, for those extension points that have been
+        registered. By default, it returns all extensions for **enabled** plugins.
+
+        :param extension_point: the extension point to get the extensions for. If None return **all** extensions. (Default: None)
+        :param enabled: If True returns all extensions for those plugins that are enabled. (Default: True)
+        :param disabled: If True return all extensions for those plugins that are disabled. (Default: False)
+
+        :return: extensions, across all plugins
+        """
         if extension_point is None:
             return [extension for plugin in self._plugin_cache.values() for extension in plugin.extensions]
 
@@ -144,6 +209,12 @@ class PluginManager:
 
     @decorator
     def ExtensionPoint(self, ep, **ep_kwargs):
+        """
+        Decorator for registering new extension points.
+        :param ep: the extension point function
+        :param ep_kwargs: arguments that need to be passed in concrete extensions. Pass
+        an argument with an Ellipsis (e.g. arg=...) to make that argument required.
+        """
         if inspect.isfunction(ep):
 
             @decorator

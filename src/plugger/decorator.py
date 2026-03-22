@@ -71,4 +71,9 @@ class Decorator:
 
 
 def decorator(f):
+    """
+    Transforms a function into a decorator
+    :param f: the function to be a decorator
+    :return: the function as a decorator
+    """
     return Decorator(f)
